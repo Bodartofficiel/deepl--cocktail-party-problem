@@ -10,4 +10,7 @@ Thomas :
 Clément :
 - Se renseigner sur le type d'entrée pour un réseau de neurones audio (timeseries)
 - Mesure out-in (distance entre 2 pistes audios, faire attention à 1->2)
-- Comprendre le papier : IIaNet
+  - Permutation Invariant Training (PIT)
+  - Scale Invariant - Signal-to-Distortion Ratio (SDR)
+  - Perceptual Evaluation of Speech Quality (PESQ)
+- Comprendre le papier : IIaNet 
