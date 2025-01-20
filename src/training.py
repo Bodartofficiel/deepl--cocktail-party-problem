@@ -1,19 +1,20 @@
 import pathlib
 
-import ffmpeg
+# import ffmpeg
 import numpy as np
-import torch.nn.modules as nn
 import torchaudio
 from datasets import load_dataset
 from tqdm import tqdm
 
-number_of_train = 400
-number_of_test = 100
-max_tensor_size = 100000
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from hybrid_transformer_cnn import HybridTransformerCNN
 
 # path = pathlib.Path("./data/clips")
 
-# iterator = list(path.glob("*"))[0]
+# iterator = path.glob("*")
 # shapes = []
 # for audio_file in tqdm(iterator):
 #     tensor, _ = torchaudio.load(str(audio_file))
@@ -28,26 +29,40 @@ max_tensor_size = 100000
 # exit()
 
 
-## Vizualize the audio source
-# import matplotlib.pyplot as plt
+# we use GPU if available, otherwise CPU
+# NB: with several GPUs, "cuda" --> "cuda:0" or "cuda:1"...
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Using device:", device, f'({torch.cuda.get_device_name(device)})' if torch.cuda.is_available() else '')
 
-# # Charger le fichier sans normalisation
-# audio, sample_rate = torchaudio.load(str(iterator), normalize=False)
 
-# # Afficher les premiers échantillons
-# plt.plot(audio[0].numpy())  # Seulement les 1000 premiers échantillons
-# plt.title("Valeurs des échantillons audio bruts")
-# plt.xlabel("Échantillons")
-# plt.ylabel("Amplitude")
-# plt.show()
-
-# exit()
+# import dataset
+number_of_train = 4
+number_of_test = 1
 
 dataset = load_dataset(
     path="./mixed_dataset",
     name=f"audio_deepl_{number_of_train}_{number_of_test}",
-    max_tensor_size=max_tensor_size,
     number_of_train=number_of_train,
     number_of_test=number_of_test,
     trust_remote_code=True,
 )
+
+train_set = dataset["train"]
+test_set = dataset["test"]
+
+
+# define data loaders
+batch_size = 100
+train_loader = torch.utils.data.DataLoader(
+                 dataset=train_set,
+                 batch_size=batch_size,
+                 shuffle=True)
+test_loader = torch.utils.data.DataLoader(
+                dataset=test_set,
+                batch_size=batch_size,
+                shuffle=False)
+
+print('total training batch number: {}'.format(len(train_loader)))
+print('total testing batch number: {}'.format(len(test_loader)))
+
+model = HybridTransformerCNN()
