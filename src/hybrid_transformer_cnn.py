@@ -29,13 +29,13 @@ class HybridTransformerCNN(nn.Module):
         out = out.view(out.size(0), -1, input.size(-1))
         return out
 
+if __name__=='__main__':
+    model = HybridTransformerCNN(short_to, 512, 2).to(device)
 
-model = HybridTransformerCNN(short_to, 512, 2).to(device)
-
-audio = torchaudio.load("data/clips/common_voice_en_41236242.mp3")[0].to(device)
+    audio = torchaudio.load("data/clips/common_voice_en_41236242.mp3")[0].to(device)
 
 
-audio = audio[:, :short_to]
-# audio = torch.stack(list([audio for i in range(5)]))
+    audio = audio[:, :short_to]
+    # audio = torch.stack(list([audio for i in range(5)]))
 
-output = model(audio)
+    output = model(audio)
