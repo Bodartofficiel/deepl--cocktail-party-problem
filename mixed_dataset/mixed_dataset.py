@@ -8,12 +8,15 @@ import torchaudio
 from .data_augmentation import augment_data
 
 torch.random.manual_seed(1)
-max_tensor_length = 4353408  # Maximum length of files in the dataset
-number_of_train = 800  # Number of example used to generate the dataset
-number_of_test = 200
+max_tensor_length = 100000  # Maximum length of files in the dataset
 
 
 class MixedDataset(datasets.GeneratorBasedBuilder):
+    def __init__(self, number_of_train, number_of_test, *args, **config_kwargs):
+        super().__init__(*args, **config_kwargs)
+        self.number_of_train = number_of_train
+        self.number_of_test = number_of_test
+
     def _info(self):
         return datasets.DatasetInfo(
             description="Data augmented dataset for cocktail party problem based on Common Voice dataset from Mozilla",
@@ -21,9 +24,7 @@ class MixedDataset(datasets.GeneratorBasedBuilder):
                 {
                     "audio1": datasets.Array2D((1, max_tensor_length), "float32"),
                     "audio2": datasets.Array2D((1, max_tensor_length), "float32"),
-                    "mixed_audio": datasets.Array2D(
-                        (16000, max_tensor_length), "float32"
-                    ),
+                    "mixed_audio": datasets.Array2D((1, max_tensor_length), "float32"),
                 }
             ),
             supervised_keys=None,
@@ -49,14 +50,20 @@ class MixedDataset(datasets.GeneratorBasedBuilder):
 
     def _generate_examples(self, files_path: pathlib.Path, split):
         i = 0
-        break_point = number_of_test if split == "test" else number_of_train
+        break_point = self.number_of_test if split == "test" else self.number_of_train
         for file1 in files_path:
+            track_1 = torchaudio.load(str(file1), format="mp3")[0]
+            # Skip if too big
+            if track_1.shape[1] > max_tensor_length:
+                continue
             for file2 in files_path:
                 if file1 != file2:
                     if i == break_point:
                         break
-                    track_1 = torchaudio.load(str(file1), format="mp3")[0]
                     track_2 = torchaudio.load(str(file2), format="mp3")[0]
+                    # Skip if too big
+                    if track_2.shape[1] > max_tensor_length:
+                        continue
 
                     track_1 = torch.nn.functional.pad(
                         track_1, (0, max_tensor_length - track_1.shape[1])
@@ -64,6 +71,7 @@ class MixedDataset(datasets.GeneratorBasedBuilder):
                     track_2 = torch.nn.functional.pad(
                         track_2, (0, max_tensor_length - track_2.shape[1])
                     )
+
                     ratio = float(torch.rand(1))
 
                     yield i, {
