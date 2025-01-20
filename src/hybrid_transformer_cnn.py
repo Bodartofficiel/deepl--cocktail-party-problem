@@ -1,4 +1,5 @@
 import torch.nn.modules as nn
+import torchaudio
 
 
 class HybridTransformerCNN(nn.Module):
@@ -12,3 +13,8 @@ class HybridTransformerCNN(nn.Module):
         out = self.transformer(out)
         out = self.fc(out)
         return out
+
+
+model = HybridTransformerCNN(100000, 512, 2)
+
+audio = torch
