@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import torchaudio
 from datasets import load_dataset
 from torchmetrics.audio import PermutationInvariantTraining
-from torchmetrics.functional import scale_invariant_signal_distortion_ratio
+from torchmetrics.functional.audio import scale_invariant_signal_distortion_ratio
 from tqdm import tqdm
 
 from hybrid_transformer_cnn import HybridTransformerCNN
@@ -41,9 +41,10 @@ print("Using device:", device)
 
 
 # import dataset
-number_of_train = 4
-number_of_test = 2
+number_of_train = 40
+number_of_test = 20
 max_tensor_size = 100000
+batch_size = 2
 
 dataset = load_dataset(
     path="./mixed_dataset",
@@ -54,59 +55,46 @@ dataset = load_dataset(
     trust_remote_code=True,
 )
 
-train_set = dataset["train"]
-test_set = dataset["test"]
+train_set = dataset["train"].batch(batch_size)
+test_set = dataset["test"].batch(batch_size)
 
 
-# define data loaders
-batch_size = 4
-train_loader = torch.utils.data.DataLoader(
-    dataset=train_set, batch_size=batch_size, shuffle=True
-)
-test_loader = torch.utils.data.DataLoader(
-    dataset=test_set, batch_size=batch_size, shuffle=False
-)
+# # define data loaders
+# train_loader = torch.utils.data.DataLoader(
+#     dataset=train_set, batch_size=batch_size, shuffle=True
+# )
+# test_loader = torch.utils.data.DataLoader(
+#     dataset=test_set, batch_size=batch_size, shuffle=False
+# )
 
-print("total training batch number: {}".format(len(train_loader)))
-print("total testing batch number: {}".format(len(test_loader)))
+# print("total training batch number: {}".format(len(train_loader)))
+# print("total testing batch number: {}".format(len(test_loader)))
 
 
-model = HybridTransformerCNN(max_tensor_size, 512, 2)
+model = HybridTransformerCNN(max_tensor_size, device, 2)
 
 model.to(device)  # puts model on GPU / CPU
 
 # optimization hyperparameters
 optimizer = torch.optim.SGD(model.parameters(), lr=0.05)  # try lr=0.01, momentum=0.9
-loss_fn = PermutationInvariantTraining(scale_invariant_signal_distortion_ratio)
+loss_fn = PermutationInvariantTraining(
+    metric_func=scale_invariant_signal_distortion_ratio
+).to(device=device)
 
 # main loop (train+test)
 for epoch in tqdm(range(10)):
     # training
     model.train()  # mode "train" agit sur "dropout" ou "batchnorm"
-    print(train_loader)
-    exit()
-    for batch_idx, element in enumerate(train_loader):
-        print(element)
-        exit()
-        audio1, audio2, mixed_audio = (
-            element["audio1"][0],
-            element["audio2"][0],
-            element["mixed_audio"][0],
+    for batch_idx, element in enumerate(train_set):
+        audio1, audio2, x = (
+            torch.tensor(element["audio1"], device=device),
+            torch.tensor(element["audio2"], device=device),
+            torch.tensor([element["mixed_audio"]], device=device).permute(1, 0, 2),
         )
-        x = mixed_audio
-        print(x)
-        exit()
-        target = (audio1, audio2)
+        target = torch.stack((audio1, audio2))
         optimizer.zero_grad()
-        x = torch.stack([tensor.float().to(device) for tensor in x])
-        target = (
-            [t.float().to(device) for t in target[0]],
-            [t.float().to(device) for t in target[1]],
-        )
         # fonctionne jusqu'ici
-        print(x)
-        print(x._nnz())
-        exit()
+
         out = model(x)
         loss = loss_fn(out, target)
         loss.backward()
@@ -117,7 +105,7 @@ for epoch in tqdm(range(10)):
                     epoch,
                     batch_idx,
                     batch_idx * len(x),
-                    len(train_loader.dataset),
+                    len(train_set),
                     loss.item(),
                 )
             )
