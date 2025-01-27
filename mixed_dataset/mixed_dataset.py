@@ -1,6 +1,7 @@
 import pathlib
 
 import datasets
+import datasets.search
 import numpy as np
 import torch
 import torchaudio
@@ -31,14 +32,23 @@ class MixedDataset(datasets.GeneratorBasedBuilder):
             description="Data augmented dataset for cocktail party problem based on Common Voice dataset from Mozilla",
             features=datasets.Features(
                 {
-                    "audio1": datasets.Array2D(
-                        (1, self.config.max_tensor_size), "float32"
+                    "audio1": datasets.Sequence(
+                        feature=datasets.Value(
+                            dtype="float32"
+                        ),  # Each element is a float32
+                        length=self.config.max_tensor_size,  # Fixed length
                     ),
-                    "audio2": datasets.Array2D(
-                        (1, self.config.max_tensor_size), "float32"
+                    "audio2": datasets.Sequence(
+                        feature=datasets.Value(
+                            dtype="float32"
+                        ),  # Each element is a float32
+                        length=self.config.max_tensor_size,  # Fixed length
                     ),
-                    "mixed_audio": datasets.Array2D(
-                        (1, self.config.max_tensor_size), "float32"
+                    "mixed_audio": datasets.Sequence(
+                        feature=datasets.Value(
+                            dtype="float32"
+                        ),  # Each element is a float32
+                        length=self.config.max_tensor_size,  # Fixed length
                     ),
                 }
             ),
@@ -72,23 +82,25 @@ class MixedDataset(datasets.GeneratorBasedBuilder):
         )
         for file1 in files_path:
             track_1 = torchaudio.load(str(file1), format="mp3")[0]
+            track_1 = track_1.view(track_1.shape[1])
             # Skip if too big
-            if track_1.shape[1] > self.config.max_tensor_size:
+            if track_1.shape[0] > self.config.max_tensor_size:
                 continue
             for file2 in files_path:
                 if file1 != file2:
                     if i == break_point:
                         break
                     track_2 = torchaudio.load(str(file2), format="mp3")[0]
+                    track_2 = track_2.view(track_2.shape[1])
                     # Skip if too big
-                    if track_2.shape[1] > self.config.max_tensor_size:
+                    if track_2.shape[0] > self.config.max_tensor_size:
                         continue
 
                     track_1 = torch.nn.functional.pad(
-                        track_1, (0, self.config.max_tensor_size - track_1.shape[1])
+                        track_1, (0, self.config.max_tensor_size - track_1.shape[0])
                     )
                     track_2 = torch.nn.functional.pad(
-                        track_2, (0, self.config.max_tensor_size - track_2.shape[1])
+                        track_2, (0, self.config.max_tensor_size - track_2.shape[0])
                     )
 
                     ratio = float(torch.rand(1))
