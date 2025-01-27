@@ -117,27 +117,16 @@ for epoch in tqdm(range(10)):
     model.eval()
     correct = 0
     with torch.no_grad():
-        confusion = torch.zeros(NUM_CLASSES, NUM_CLASSES)
-        for batch_idx, (x, target) in enumerate(test_loader):
-            x, target = x.to(device), target.to(device)
+        sum_loss = 0
+        for batch_idx, element in enumerate(test_set):
+            audio1, audio2, x = (
+                torch.tensor(element["audio1"], device=device),
+                torch.tensor(element["audio2"], device=device),
+                torch.tensor([element["mixed_audio"]], device=device).permute(1, 0, 2),
+            )
+            target = torch.stack((audio1, audio2))
             out = model(x)
             loss = loss_fn(out, target)
-            # _, prediction = torch.max(out.data, 1)
-            prediction = out.argmax(
-                dim=1, keepdim=True
-            )  # index of the max log-probability
-            correct += prediction.eq(target.view_as(prediction)).sum().item()
-            # since 'prediction' and 'target' may be on the GPU memory
-            # thus (i,j) are on the GPU as well. They must be transfered
-            # to the CPU, where 'confusion' has been allocated
-            for i, j in zip(prediction, target):
-                confusion[i.to("cpu"), j.to("cpu")] += 1
-    taux_classif = 100.0 * correct / len(test_loader.dataset)
-    print(
-        "Accuracy: {}/{} (tx {:.2f}%, err {:.2f}%)".format(
-            correct, len(test_loader.dataset), taux_classif, 100.0 - taux_classif
-        )
-    )
-    torch.set_printoptions(sci_mode=False)
-    print("Confusion matrix:")
-    print(confusion.int().numpy())  # or e.g print(confusion.to(torch.int16))
+            sum_loss += loss.item()
+    print("Average loss:", sum_loss / (batch_idx + 1))
+    # torch.set_printoptions(sci_mode=False)
