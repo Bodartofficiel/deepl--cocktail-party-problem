@@ -8,6 +8,7 @@ import torch.nn.functional as F
 import torchaudio
 from datasets import load_dataset
 from torchmetrics.audio import PermutationInvariantTraining
+from torchmetrics.functional import mean_squared_error
 from torchmetrics.functional.audio import scale_invariant_signal_distortion_ratio
 from tqdm import tqdm
 
@@ -41,9 +42,11 @@ print("Using device:", device)
 
 
 # import dataset
-number_of_train = 40
-number_of_test = 20
-max_tensor_size = 100000
+number_of_train = 800
+number_of_test = 200
+max_tensor_size = 131072
+compression_factor = 4
+input_size = max_tensor_size // compression_factor
 batch_size = 2
 
 dataset = load_dataset(
@@ -52,6 +55,7 @@ dataset = load_dataset(
     number_of_train=number_of_train,
     number_of_test=number_of_test,
     max_tensor_size=max_tensor_size,
+    compression_factor=compression_factor,
     trust_remote_code=True,
 )
 
@@ -71,15 +75,13 @@ test_set = dataset["test"].batch(batch_size)
 # print("total testing batch number: {}".format(len(test_loader)))
 
 
-model = HybridTransformerCNN(max_tensor_size, device, 2)
+model = HybridTransformerCNN(input_size, device, 2)
 
 model.to(device)  # puts model on GPU / CPU
 
 # optimization hyperparameters
 optimizer = torch.optim.SGD(model.parameters(), lr=0.05)  # try lr=0.01, momentum=0.9
-loss_fn = PermutationInvariantTraining(
-    metric_func=scale_invariant_signal_distortion_ratio
-).to(device=device)
+loss_fn = PermutationInvariantTraining(metric_func=mean_squared_error).to(device=device)
 
 # main loop (train+test)
 for epoch in tqdm(range(10)):
@@ -96,6 +98,8 @@ for epoch in tqdm(range(10)):
         # fonctionne jusqu'ici
 
         out = model(x)
+        print(out.shape)
+        exit()
         loss = loss_fn(out, target)
         loss.backward()
         optimizer.step()

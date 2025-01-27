@@ -7,18 +7,25 @@ import torch
 import torchaudio
 
 from .data_augmentation import augment_data
+from .utils import compress_audio_tensor
 
 torch.random.manual_seed(1)
 
 
 class MixedDatasetConfig(datasets.BuilderConfig):
     def __init__(
-        self, number_of_train, number_of_test, max_tensor_size=100000, **kwargs
+        self,
+        number_of_train,
+        number_of_test,
+        max_tensor_size=100000,
+        compression_factor=4,
+        **kwargs
     ):
         super().__init__(**kwargs)
         self.number_of_train = number_of_train
         self.number_of_test = number_of_test
         self.max_tensor_size = max_tensor_size
+        self.compression_factor = compression_factor
 
 
 class MixedDataset(datasets.GeneratorBasedBuilder):
@@ -36,19 +43,22 @@ class MixedDataset(datasets.GeneratorBasedBuilder):
                         feature=datasets.Value(
                             dtype="float32"
                         ),  # Each element is a float32
-                        length=self.config.max_tensor_size,  # Fixed length
+                        length=self.config.max_tensor_size
+                        // self.config.compression_factor,  # Fixed length
                     ),
                     "audio2": datasets.Sequence(
                         feature=datasets.Value(
                             dtype="float32"
                         ),  # Each element is a float32
-                        length=self.config.max_tensor_size,  # Fixed length
+                        length=self.config.max_tensor_size
+                        // self.config.compression_factor,  # Fixed length
                     ),
                     "mixed_audio": datasets.Sequence(
                         feature=datasets.Value(
                             dtype="float32"
                         ),  # Each element is a float32
-                        length=self.config.max_tensor_size,  # Fixed length
+                        length=self.config.max_tensor_size
+                        // self.config.compression_factor,  # Fixed length
                     ),
                 }
             ),
@@ -82,26 +92,34 @@ class MixedDataset(datasets.GeneratorBasedBuilder):
         )
         for file1 in files_path:
             track_1 = torchaudio.load(str(file1), format="mp3")[0]
-            track_1 = track_1.view(track_1.shape[1])
+
             # Skip if too big
-            if track_1.shape[0] > self.config.max_tensor_size:
+            if track_1.shape[1] > self.config.max_tensor_size:
                 continue
+            track_1 = compress_audio_tensor(
+                torch.nn.functional.pad(
+                    track_1, (0, self.config.max_tensor_size - track_1.shape[1])
+                ),
+                self.config.compression_factor,
+            )
+            track_1 = track_1.view(track_1.shape[1])
             for file2 in files_path:
                 if file1 != file2:
                     if i == break_point:
                         break
                     track_2 = torchaudio.load(str(file2), format="mp3")[0]
-                    track_2 = track_2.view(track_2.shape[1])
+
                     # Skip if too big
-                    if track_2.shape[0] > self.config.max_tensor_size:
+                    if track_2.shape[1] > self.config.max_tensor_size:
                         continue
 
-                    track_1 = torch.nn.functional.pad(
-                        track_1, (0, self.config.max_tensor_size - track_1.shape[0])
+                    track_2 = compress_audio_tensor(
+                        torch.nn.functional.pad(
+                            track_2, (0, self.config.max_tensor_size - track_2.shape[1])
+                        ),
+                        self.config.compression_factor,
                     )
-                    track_2 = torch.nn.functional.pad(
-                        track_2, (0, self.config.max_tensor_size - track_2.shape[0])
-                    )
+                    track_2 = track_2.view(track_2.shape[1])
 
                     ratio = float(torch.rand(1))
 
