@@ -13,6 +13,7 @@ from torchmetrics.functional.audio import scale_invariant_signal_distortion_rati
 from tqdm import tqdm
 
 from hybrid_transformer_cnn import HybridTransformerCNN
+from loss import pit_mse_loss
 
 # path = pathlib.Path("./data/clips")
 
@@ -47,7 +48,7 @@ number_of_test = 200
 max_tensor_size = 131072
 compression_factor = 4
 input_size = max_tensor_size // compression_factor
-batch_size = 2
+batch_size = 4
 
 dataset = load_dataset(
     path="./mixed_dataset",
@@ -81,7 +82,7 @@ model.to(device)  # puts model on GPU / CPU
 
 # optimization hyperparameters
 optimizer = torch.optim.SGD(model.parameters(), lr=0.05)  # try lr=0.01, momentum=0.9
-loss_fn = PermutationInvariantTraining(metric_func=mean_squared_error).to(device=device)
+loss_fn = pit_mse_loss
 
 # main loop (train+test)
 for epoch in tqdm(range(10)):
@@ -93,13 +94,11 @@ for epoch in tqdm(range(10)):
             torch.tensor(element["audio2"], device=device),
             torch.tensor([element["mixed_audio"]], device=device).permute(1, 0, 2),
         )
-        target = torch.stack((audio1, audio2))
+        target = torch.stack((audio1, audio2)).permute(1, 0, 2)
         optimizer.zero_grad()
         # fonctionne jusqu'ici
 
         out = model(x)
-        print(out.shape)
-        exit()
         loss = loss_fn(out, target)
         loss.backward()
         optimizer.step()
@@ -124,7 +123,7 @@ for epoch in tqdm(range(10)):
                 torch.tensor(element["audio2"], device=device),
                 torch.tensor([element["mixed_audio"]], device=device).permute(1, 0, 2),
             )
-            target = torch.stack((audio1, audio2))
+            target = torch.stack((audio1, audio2)).permute(1, 0, 2)
             out = model(x)
             loss = loss_fn(out, target)
             sum_loss += loss.item()

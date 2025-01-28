@@ -26,3 +26,6 @@ __pycache__/
 venv/
 .env
 .DS_Store
+logs
+results
+results_si_sdr
