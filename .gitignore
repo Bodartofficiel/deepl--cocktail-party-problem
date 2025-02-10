@@ -29,3 +29,4 @@ venv/
 logs
 results
 results_si_sdr
+res*

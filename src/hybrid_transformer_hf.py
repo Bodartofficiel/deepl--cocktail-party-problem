@@ -1,16 +1,28 @@
+from typing import Literal
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import PretrainedConfig, PreTrainedModel
 
-from loss import pit_mse_loss, pit_si_sdr_loss
+from loss import pit_mse_loss, pit_si_sdr_loss, pit_spectral_loss
 
 
 class HybridTransformerCNNConfig(PretrainedConfig):
-    def __init__(self, input_size=131072, output_size=2, loss="pit_mse", **kwargs):
+    def __init__(
+        self,
+        d_model=64,
+        n_head=4,
+        num_encoder_layers=1,
+        num_decoder_layers=1,
+        loss: Literal["pit_mse", "pit_si_sdr", "pit_spectral"] = "pit_mse",
+        **kwargs
+    ):
         super().__init__(**kwargs)
-        self.input_size = input_size
-        self.output_size = output_size
+        self.d_model = d_model
+        self.n_head = n_head
+        self.num_encoder_layers = num_encoder_layers
+        self.num_decoder_layers = num_decoder_layers
         self.loss = loss
 
 
@@ -19,70 +31,80 @@ class HybridTransformerCNN(PreTrainedModel):
 
     def __init__(self, config: HybridTransformerCNNConfig):
         super().__init__(config)
-        self.input_size = config.input_size
-        self.output_size = config.output_size
+        self.d_model = config.d_model
+        self.n_head = config.n_head
+        self.num_encoder_layers = config.num_encoder_layers
+        self.num_decoder_layers = config.num_decoder_layers
         self.loss = {
             "pit_mse": pit_mse_loss,
             "pit_si_sdr": pit_si_sdr_loss,
+            "pit_spectral": pit_spectral_loss,
         }[config.loss]
 
-        self.mp1 = nn.MaxPool1d(kernel_size=2, stride=2)
+        # *************************************************
+        # ****************** Encoding *********************
+        # *************************************************
+
         self.conv1 = nn.Conv1d(
-            in_channels=1, out_channels=16, kernel_size=7, stride=1, padding=3
+            in_channels=20,
+            out_channels=self.d_model,
+            kernel_size=3,
+            stride=1,
+            padding=1,
         )
-        self.mp2 = nn.MaxPool1d(kernel_size=2, stride=2)
-        self.conv2 = nn.Conv1d(
-            in_channels=16, out_channels=16, kernel_size=6, stride=2, padding=2
+        self.relu = nn.ReLU()
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=self.d_model, nhead=self.n_head, batch_first=True
         )
-        self.mp3 = nn.MaxPool1d(kernel_size=2, stride=2)
-        self.conv3 = nn.Conv1d(
-            in_channels=16, out_channels=16, kernel_size=6, stride=2, padding=2
-        )
-        self.mp4 = nn.MaxPool1d(kernel_size=2, stride=2)
-        self.conv4 = nn.Conv1d(
-            in_channels=16, out_channels=64, kernel_size=6, stride=2, padding=2
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=self.num_encoder_layers,
         )
 
-        self.transformer = nn.Transformer(
-            d_model=64, batch_first=True  # Embedding size and batch format
+        # *************************************************
+        # ****************** Decoding *********************
+        # *************************************************
+
+        decoder_layer = nn.TransformerEncoderLayer(
+            d_model=self.d_model, nhead=self.n_head, batch_first=True
         )
+        self.transformer_decoder1 = nn.TransformerEncoder(
+            decoder_layer, num_layers=self.num_decoder_layers
+        )
+        self.transformer_decoder2 = nn.TransformerEncoder(
+            decoder_layer, num_layers=self.num_decoder_layers
+        )
+
+        self.fc1 = nn.Linear(self.d_model, 20)
+        self.fc2 = nn.Linear(self.d_model, 20)
 
     def forward(self, input_ids: torch.Tensor, labels: torch.Tensor = None):
-        """
-        input_ids: Tensor de forme (batch_size, input_size).
-        labels: Tensor de forme (batch_size, output_size, input_size), utilisé pour la perte.
+        (B, T, F) = input_ids.shape
 
-        Retourne :
-            - Un dictionnaire avec les clés :
-              - logits : la sortie du modèle.
-              - loss : la perte si les labels sont fournis.
-        """
-        x = input_ids.unsqueeze(1)  # Ajouter une dimension pour in_channels
-        out = self.mp1(x)
-        out = self.conv1(out)
-        out = self.mp2(out)
-        out = self.conv2(out)
-        out = self.mp3(out)
-        out = self.conv3(out)
-        out = self.mp4(out)
-        out = self.conv4(out)
+        x = input_ids.permute(0, 2, 1)
 
-        # Transformer Layer
-        out = out.permute(0, 2, 1)  # (batch_size, seq_len, embed_dim)
-        out = self.transformer(
-            out,
-            torch.zeros(
-                (out.size(0), self.input_size * self.output_size // 64, 64),
-                device=out.device,
-            ),
-        )
+        x_conv = self.conv1(x)
+        x_conv = self.relu(x_conv)
 
-        # Projection finale
-        logits = out.view(-1, self.output_size, self.input_size)
+        x_transf = x_conv.permute(0, 2, 1)
+        encoded = self.transformer_encoder(x_transf)
+
+        # Two sources
+        encoded1 = encoded.clone()
+        encoded2 = encoded.clone()
+
+        dec1 = self.transformer_decoder1(encoded1)
+        dec2 = self.transformer_decoder2(encoded2)
+
+        out1 = self.fc1(dec1)
+        out2 = self.fc2(dec2)
+
+        out = torch.stack([out1, out2], dim=1)
 
         loss = None
         if labels is not None:
             # Calculer la perte avec MSE
-            loss = self.loss(logits, labels)
+            loss = self.loss(out, labels)
 
-        return {"logits": logits, "loss": loss}
+        return {"logits": out, "loss": loss}

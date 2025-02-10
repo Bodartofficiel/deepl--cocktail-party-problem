@@ -9,6 +9,7 @@ from tqdm import tqdm
 from transformers import Trainer, TrainingArguments
 
 from hybrid_transformer_hf import HybridTransformerCNN, HybridTransformerCNNConfig
+from parameters import *
 from training_func import compute_metrics, preprocess_function
 
 # Configuration
@@ -19,24 +20,17 @@ device = torch.device(
 )
 print("Using device:", device)
 
-# Paramètres d'entraînement
-number_of_train = 800
-number_of_test = 200
-max_tensor_size = 131072
-compression_factor = 4
-input_size = max_tensor_size // compression_factor
-batch_size = 4
-num_epochs = 10
-learning_rate = 0.05
 
 # Chargement du dataset
 dataset = load_dataset(
     path="./mixed_dataset",
-    name=f"audio_deepl_{number_of_train}_{number_of_test}",
-    number_of_train=number_of_train,
-    number_of_test=number_of_test,
-    max_tensor_size=max_tensor_size,
-    compression_factor=compression_factor,
+    name=f"audio_deepl_{NUMBER_OF_TRAIN}_{NUMBER_OF_TEST}",
+    number_of_train=NUMBER_OF_TRAIN,
+    number_of_test=NUMBER_OF_TEST,
+    max_tensor_size=MAX_TENSOR_SIZE,
+    win_length=DEFAULT_WIN_LENGTH,
+    win_steps=DEFAULT_WIN_STEPS,
+    n_mels=DEFAULT_N_MELS,
     trust_remote_code=True,
 )
 
@@ -53,25 +47,35 @@ test_dataset = dataset["test"].map(
 
 
 model_config = HybridTransformerCNNConfig(
-    input_size=input_size, output_size=2, loss="pit_si_sdr"
-)
+    d_model=D_MODEL,
+    n_head=N_HEAD,
+    num_encoder_layers=NUM_ENCODER_LAYERS,
+    num_decoder_layers=NUM_DECODER_LAYERS,
+    loss=loss,
+).from_pretrained("res_lr0.001_dm128_nh4_nel2_ndl2/checkpoint-2000")
+
 model = HybridTransformerCNN(model_config)
 model.to(device)
 
+print(
+    f"Number of trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}",
+)
+
 
 training_args = TrainingArguments(
-    output_dir="./results_si_sdr",
+    output_dir=f"./res_lr{LEARNING_RATE}_dm{D_MODEL}_nh{N_HEAD}_nel{NUM_ENCODER_LAYERS}_ndl{NUM_DECODER_LAYERS}",
     eval_strategy="epoch",
     save_strategy="epoch",
-    learning_rate=learning_rate,
-    per_device_train_batch_size=batch_size,
-    per_device_eval_batch_size=batch_size,
-    num_train_epochs=num_epochs,
+    learning_rate=LEARNING_RATE,
+    per_device_train_batch_size=BATCH_SIZE,
+    per_device_eval_batch_size=BATCH_SIZE,
+    num_train_epochs=NUM_EPOCHS,
     weight_decay=0.01,
     logging_dir="./logs",
     logging_steps=10,
     save_total_limit=2,
     remove_unused_columns=False,
+    max_grad_norm=1.0,
 )
 
 
@@ -87,3 +91,17 @@ trainer = Trainer(
 trainer.train()
 
 results = trainer.evaluate()
+
+# Test the model on one example from the train dataset
+example = train_dataset[0]
+inputs = {
+    key: torch.tensor([value]).to(device)
+    for key, value in example.items()
+    if key != "labels"
+}
+labels = torch.tensor([example["labels"]]).to(device)
+
+model.eval()
+with torch.no_grad():
+    outputs = model(**inputs)
+    torchaudio.save("data/output/output.wav", outputs, 16000)
